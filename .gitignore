@@ -1,0 +1,33 @@
+# Node
+node_modules/
+dist/
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Uploads (local files)
+backend/uploads/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+
+# Build
+frontend/dist/
