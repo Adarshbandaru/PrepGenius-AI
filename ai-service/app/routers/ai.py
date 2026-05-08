@@ -58,9 +58,31 @@ async def parse_resume_endpoint(req: ResumeParseRequest):
 
 @router.post("/analyze-resume")
 async def analyze_resume_endpoint(req: ResumeAnalyzeRequest):
-    """ATS score, job role recommendations, skill gap, certifications."""
+    """
+    ATS score, job role recommendations, skill gap, certifications.
+    Pipeline:
+    1. ML Component 1 (TF-IDF scikit-learn): Compute ATS score via cosine similarity
+    2. LLM (Groq/Gemini): Enrich with role recommendations, skill gaps, certifications
+    3. Merge: Return both ML score + LLM enrichment
+    """
     from app.core.llm import call_llm, extract_json
     from app.core.prompts_extra import RESUME_INTELLIGENCE_SYSTEM, RESUME_INTELLIGENCE_USER
+
+    p = req.parsed_resume
+
+    # ── STEP 1: Real ML — TF-IDF ATS Scorer ─────────────────────────────────
+    ml_ats_result = None
+    try:
+        from app.ml.tfidf_ats_scorer import compute_ats_score
+        target_role = "Software Developer"
+        if p.get("experience"):
+            target_role = p["experience"][0].get("role", "Software Developer")
+        ml_ats_result = compute_ats_score(p, target_role)
+        print(f"[ML-ATS] TF-IDF score: {ml_ats_result['ats_score']} for role: {target_role}")
+    except Exception as ml_e:
+        print(f"[ML-ATS] TF-IDF scorer error: {ml_e}")
+
+    # ── STEP 2: LLM — Role Recommendations & Skill Gap ───────────────────────
     try:
         p = req.parsed_resume
         skills_str   = ", ".join(p.get("skills", [])[:20]) or "Not specified"
@@ -155,12 +177,39 @@ async def generate_questions_endpoint(req: QuestionRequest):
 
 @router.post("/evaluate-answer")
 async def evaluate_answer_endpoint(req: EvaluateRequest):
+    """
+    Evaluate candidate answer.
+    Pipeline:
+    1. ML Component 2 (SBERT): Semantic similarity score using sentence-transformers
+    2. LLM (Groq/Gemini): Detailed feedback and structured score
+    3. Blend: Weighted average of SBERT score + LLM score
+    """
     from app.services.answer_evaluator import evaluate_answer
     try:
+        # Run LLM evaluation
         result = await evaluate_answer(
             question=req.question, answer=req.answer,
             mode=req.mode, topic=req.topic, difficulty=req.difficulty,
         )
+        # Run SBERT ML scorer in parallel (non-blocking)
+        try:
+            from app.ml.semantic_scorer import compute_semantic_score
+            ml_result = compute_semantic_score(
+                question=req.question,
+                answer=req.answer,
+                topic=req.topic,
+                difficulty=req.difficulty,
+            )
+            result["ml_semantic_score"] = ml_result["semantic_score"]
+            result["ml_similarity"]     = ml_result["similarity"]
+            result["ml_method"]         = ml_result["method"]
+            result["ml_confidence"]     = ml_result["confidence"]
+            # Blend: 60% LLM + 40% SBERT for final score
+            llm_score  = result.get("score", 5.0)
+            sbert_score = ml_result["semantic_score"]
+            result["blended_score"] = round(llm_score * 0.6 + sbert_score * 0.4, 2)
+        except Exception as ml_e:
+            print(f"[SBERT] Scorer error (non-fatal): {ml_e}")
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
