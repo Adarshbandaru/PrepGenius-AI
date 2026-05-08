@@ -1,9 +1,18 @@
 # Node
 node_modules/
 dist/
+
+# Environment files — NEVER commit these (contain API keys)
 .env
 .env.local
 .env.production
+.env.development
+**/.env
+**/.env.local
+**/.env.production
+backend/.env
+ai-service/.env
+frontend/.env
 
 # Python
 __pycache__/
